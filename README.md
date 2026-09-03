@@ -89,6 +89,7 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 
 ---
 
+
 ## 📚 References
 
 1. **Linux man-pages:** `shm_open(3)`, `mmap(2)`, `ftruncate(2)`, `sem_open(3)`, `sem_wait(3)`, `sem_post(3)`.
@@ -96,4 +97,16 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 3. Elmasri and Navathe, *Fundamentals of Database Systems*.
 4. Redis Documentation — Background on in-memory key-value caching design.
 5. POSIX / The Open Group Specifications for Shared Memory and Semaphore Interfaces.
+
+---
+
+## 🗂️ Proposed Project Repository Structure
+
+```text
+├── include/          # Header files containing public interfaces, structs, and relative-offset memory layouts
+├── src/              # Implementation source files for the OS memory wrapper, database engine, server daemon, and client API
+├── tests/            # Multi-process concurrency validation scripts and automated stress testers
+├── docs/             # Architecture diagrams and design notes for mentor reviews
+├── CMakeLists.txt    # Unified build automation script so everyone compiles identically
+└── README.md         # Project overview, architecture breakdown, and compilation steps
 
