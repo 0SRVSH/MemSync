@@ -1,0 +1,1 @@
+Directory to store architecture diagrams and design notes for mentor reviews

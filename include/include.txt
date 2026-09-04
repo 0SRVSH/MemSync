@@ -1,0 +1,1 @@
+Directory to store header files containing public interfaces, structs, and relative-offset memory layouts
