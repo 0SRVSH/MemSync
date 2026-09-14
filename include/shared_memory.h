@@ -13,7 +13,7 @@ class SharedMemoryManager{
     std::string shm_name;
     std::string sem_name;
     size_t shm_size;
-    int shm_fd; //file descriptor
+    int shm_fd; //file descriptor returned by shm_open()
     void* mapped_ptr; //address of the start of virtual memory
     sem_t* semaphore; 
     bool is_owner; //server ->true, client->false
@@ -22,7 +22,7 @@ class SharedMemoryManager{
     ~SharedMemoryManager();
     bool init_as_server();
     bool attach_as_client();
-    void lock();
+    void lock();    
     void unlock();
     void *get_base_ptr();
     void cleanup();
