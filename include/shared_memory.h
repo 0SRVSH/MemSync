@@ -1,7 +1,7 @@
 #ifndef SHARED_MEMORY_H
 #define SHARED_MEMORY_H
 #include<cstddef> //for using size_t 
-#include<semaphore.h> //posix semaphore library
+#include<semaphore.h> // posix semaphore library
 #include<string>
 struct MemSyncHeader{
     size_t total_bytes; //total allocated memory size
