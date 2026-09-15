@@ -10,7 +10,13 @@
 #define MAX_KEY_LEN 64
 #define MAX_VAL_LEN 256
 
-// Memory header layout located at byte offset 0
+// Slot state for linear probing tombstone handling
+enum class SlotState : uint8_t {
+    EMPTY = 0,
+    OCCUPIED = 1,
+    DELETED = 2
+};
+
 struct CacheHeader {
     uint32_t magic;          // Initialization verification flag
     uint32_t capacity;       // Maximum slot capacity
@@ -18,9 +24,8 @@ struct CacheHeader {
     uint32_t data_offset;    // Byte offset where entry array begins
 };
 
-// Fixed-size record structure stored inside RAM slots
 struct CacheEntry {
-    bool is_occupied;        // Slot occupation state
+    SlotState state;         // Slot state: EMPTY, OCCUPIED, or DELETED
     char key[MAX_KEY_LEN];   // Key identifier
     char value[MAX_VAL_LEN]; // Value payload
     uint64_t timestamp;      // Unix timestamp of last update
@@ -34,5 +39,6 @@ int32_t find_slot(void* shm_base, const char* key);
 bool cache_put(void* shm_base, const char* key, const char* value);
 bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_timestamp);
 bool cache_update(void* shm_base, const char* key, const char* new_value);
+bool cache_delete(void* shm_base, const char* key); // <--- NEW
 
 #endif // CACHE_ENGINE_H
