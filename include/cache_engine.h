@@ -29,12 +29,18 @@ enum class SlotState : uint8_t {
 // We have used unsigned int as it guarantees the number can never be negative, and it is always the exact same size on any computer i.e. maintains Universal Consistency.
 
 struct CacheHeader {
-    uint32_t magic;          // Initialization of verification flag
+    uint32_t magic;          // Initialization verification flag
     uint32_t capacity;       // Maximum slot capacity
     uint32_t entry_count;    // Active allocated entries
     uint32_t data_offset;    // Byte offset where entry array begins
+    
+    // DBMS Telemetry Counters (Process-Shared RAM metrics)
+    uint64_t total_hits;
+    uint64_t total_misses;
+    uint64_t total_collisions;
 };
 
+// Add declaration
 struct CacheEntry {
     SlotState state;         // Slot state: EMPTY, OCCUPIED, or DELETED
     char key[MAX_KEY_LEN];   // Key identifier
@@ -52,4 +58,5 @@ bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_t
 bool cache_update(void* shm_base, const char* key, const char* new_value);
 bool cache_delete(void* shm_base, const char* key); // <--- NEW
 
+void cache_print_telemetry(void* shm_base);
 #endif // CACHE_ENGINE_H
