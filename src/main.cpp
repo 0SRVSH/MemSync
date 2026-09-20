@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <semaphore.h>
 #include <ctime>
+#include <cassert>
 #include "cache_engine.h"
 
 #define SHM_NAME "/memsync_shm"
@@ -13,6 +14,9 @@
 #define SHM_SIZE (4 * 1024 * 1024)
 
 int main() {
+    shm_unlink(SHM_NAME);
+    sem_unlink(SEM_NAME);
+
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) { perror("shm_open failed"); return 1; }
 
@@ -26,13 +30,17 @@ int main() {
     header->capacity = 1000;
     header->entry_count = 0;
     header->data_offset = sizeof(CacheHeader);
+    header->total_hits = 0;
+    header->total_misses = 0;
+    header->total_collisions = 0;
 
     std::memset(static_cast<uint8_t*>(shm_base) + header->data_offset, 0, header->capacity * sizeof(CacheEntry));
+    cache_init_lock(header);
 
     sem_t* sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
     if (sem == SEM_FAILED) { perror("sem_open failed"); return 1; }
 
-    std::cout << "=== MemSync Engine Tombstone & Deletion Test ===" << std::endl;
+    std::cout << "=== MemSync Engine Comprehensive Test ===" << std::endl;
 
     // 1. Test PUT
     sem_wait(sem);
@@ -66,6 +74,29 @@ int main() {
     sem_post(sem);
     if (reinsert_ok) std::cout << "[PUT] Inserted 'user:102' reusing slot (Active entries: " << header->entry_count << ")" << std::endl;
 
+    // 6. Test Lazy Eviction with TTL = 2 seconds
+    sem_wait(sem);
+    cache_put_ttl(shm_base, "session:temp", "short_lived_token", 2);
+    sem_post(sem);
+
+    sem_wait(sem);
+    bool found_early = cache_get(shm_base, "session:temp", val_buffer, &ts);
+    sem_post(sem);
+    if (found_early) std::cout << "[TTL Test] Initially found: " << val_buffer << std::endl;
+
+    std::cout << "[TTL Test] Sleeping for 3 seconds to trigger TTL expiry..." << std::endl;
+    sleep(3);
+
+    sem_wait(sem);
+    bool found_late = cache_get(shm_base, "session:temp", val_buffer, &ts);
+    sem_post(sem);
+    if (!found_late) std::cout << "[TTL Test] Key expired and lazily evicted (Miss verified - OK)" << std::endl;
+
+    // Print Telemetry
+    sem_wait(sem);
+    cache_print_telemetry(shm_base);
+    sem_post(sem);
+
     // Cleanup
     sem_close(sem);
     sem_unlink(SEM_NAME);
@@ -73,6 +104,6 @@ int main() {
     close(shm_fd);
     shm_unlink(SHM_NAME);
 
-    std::cout << "=== Test Completed Successfully ===" << std::endl;
+    std::cout << "=== Comprehensive Test Completed Successfully ===" << std::endl;
     return 0;
 }
