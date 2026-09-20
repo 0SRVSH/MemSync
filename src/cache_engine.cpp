@@ -1,6 +1,8 @@
 #include "cache_engine.h"
 #include <cstring>
 #include <ctime>
+#include <iostream>
+#include <iomanip>
 
 uint32_t hash_key(const char* key, uint32_t capacity) {
     uint32_t hash = 5381;
@@ -18,7 +20,6 @@ CacheEntry* get_entry_ptr(void* shm_base, uint32_t index) {
     return reinterpret_cast<CacheEntry*>(static_cast<uint8_t*>(shm_base) + offset);
 }
 
-// Linear probing: finds existing matching slot OR first available slot (EMPTY or DELETED)
 int32_t find_slot(void* shm_base, const char* key) {
     if (!shm_base || !key) return -1;
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
@@ -26,26 +27,26 @@ int32_t find_slot(void* shm_base, const char* key) {
     int32_t first_deleted_idx = -1;
 
     for (uint32_t i = 0; i < header->capacity; i++) {
+        if (i > 0) {
+            header->total_collisions++; // Track linear probing extra steps/collisions
+        }
         uint32_t curr_index = (start_index + i) % header->capacity;
         CacheEntry* entry = get_entry_ptr(shm_base, curr_index);
 
         if (entry->state == SlotState::EMPTY) {
-            // Key does not exist; return first available tombstone slot or this empty slot
             return (first_deleted_idx != -1) ? first_deleted_idx : curr_index;
         }
 
         if (entry->state == SlotState::DELETED) {
-            // Track first tombstone encountered for reuse during PUT
             if (first_deleted_idx == -1) {
                 first_deleted_idx = curr_index;
             }
         } else if (entry->state == SlotState::OCCUPIED && std::strcmp(entry->key, key) == 0) {
-            // Found existing key
             return curr_index;
         }
     }
 
-    return first_deleted_idx; // Return reusable tombstone if table is otherwise full
+    return first_deleted_idx;
 }
 
 bool cache_put(void* shm_base, const char* key, const char* value) {
@@ -54,7 +55,7 @@ bool cache_put(void* shm_base, const char* key, const char* value) {
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
     int32_t slot_idx = find_slot(shm_base, key);
 
-    if (slot_idx < 0) return false; // Cache is completely full
+    if (slot_idx < 0) return false;
 
     CacheEntry* entry = get_entry_ptr(shm_base, slot_idx);
 
@@ -84,10 +85,12 @@ bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_t
         CacheEntry* entry = get_entry_ptr(shm_base, curr_index);
 
         if (entry->state == SlotState::EMPTY) {
-            return false; // Key does not exist
+            header->total_misses++;
+            return false;
         }
         
         if (entry->state == SlotState::OCCUPIED && std::strcmp(entry->key, key) == 0) {
+            header->total_hits++;
             std::strncpy(out_value, entry->value, MAX_VAL_LEN - 1);
             out_value[MAX_VAL_LEN - 1] = '\0';
             if (out_timestamp) {
@@ -96,6 +99,7 @@ bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_t
             return true;
         }
     }
+    header->total_misses++;
     return false;
 }
 
@@ -110,7 +114,7 @@ bool cache_update(void* shm_base, const char* key, const char* new_value) {
         CacheEntry* entry = get_entry_ptr(shm_base, curr_index);
 
         if (entry->state == SlotState::EMPTY) {
-            return false; // Key not found
+            return false;
         }
         
         if (entry->state == SlotState::OCCUPIED && std::strcmp(entry->key, key) == 0) {
@@ -123,7 +127,6 @@ bool cache_update(void* shm_base, const char* key, const char* new_value) {
     return false;
 }
 
-// Mark record slot as DELETED (Tombstone)
 bool cache_delete(void* shm_base, const char* key) {
     if (!shm_base || !key) return false;
 
@@ -135,7 +138,7 @@ bool cache_delete(void* shm_base, const char* key) {
         CacheEntry* entry = get_entry_ptr(shm_base, curr_index);
 
         if (entry->state == SlotState::EMPTY) {
-            return false; // Key does not exist
+            return false;
         }
         
         if (entry->state == SlotState::OCCUPIED && std::strcmp(entry->key, key) == 0) {
@@ -151,4 +154,25 @@ bool cache_delete(void* shm_base, const char* key) {
         }
     }
     return false;
+}
+
+void cache_print_telemetry(void* shm_base) {
+    if (!shm_base) return;
+    const CacheHeader* h = static_cast<const CacheHeader*>(shm_base);
+    double load_factor = (h->capacity > 0) ? (static_cast<double>(h->entry_count) / h->capacity) * 100.0 : 0.0;
+    uint64_t total_queries = h->total_hits + h->total_misses;
+    double hit_ratio = (total_queries > 0) ? (static_cast<double>(h->total_hits) / total_queries) * 100.0 : 0.0;
+
+    std::cout << "\n=== MemSync DBMS Telemetry Report ===" << std::endl;
+    std::cout << "Capacity          : " << h->capacity << std::endl;
+    std::cout << "Active Entries    : " << h->entry_count << std::endl;
+    std::cout << "Load Factor (\u03b1)    : " << std::fixed << std::setprecision(2) << load_factor << "%" << std::endl;
+    if (load_factor > 70.0) {
+        std::cout << "[WARN] \u03b1 > 70%: Linear probing performance degradation threshold reached!" << std::endl;
+    }
+    std::cout << "Total Hits        : " << h->total_hits << std::endl;
+    std::cout << "Total Misses      : " << h->total_misses << std::endl;
+    std::cout << "Hit Ratio         : " << std::fixed << std::setprecision(2) << hit_ratio << "%" << std::endl;
+    std::cout << "Total Collisions  : " << h->total_collisions << std::endl;
+    std::cout << "=====================================\n" << std::endl;
 }

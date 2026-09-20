@@ -11,13 +11,13 @@
 #define SHM_SIZE (4 * 1024 * 1024)
 
 int main() {
-    int shm_fd = shm_open(SHM_NAME, O_RDONLY, 0666);
+    int shm_fd = shm_open(SHM_NAME, O_RDWR, 0666); // Changed to O_RDWR for telemetry writes
     if (shm_fd == -1) {
-        perror("reader: shm_open failed (start writer first)");
+        perror("reader: shm_open failed (start writer/init first)");
         return 1;
     }
 
-    void* shm_base = mmap(nullptr, SHM_SIZE, PROT_READ, MAP_SHARED, shm_fd, 0);
+    void* shm_base = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (shm_base == MAP_FAILED) { perror("reader: mmap failed"); return 1; }
 
     sem_t* sem = sem_open(SEM_NAME, 0);
@@ -34,7 +34,7 @@ int main() {
 
     std::cout << "[Reader] Polling shared memory (zero-copy IPC)..." << std::endl;
     for (int loop = 0; loop < 5; loop++) {
-        std::cout << "--- Tick " << loop + 1 << " ---" << std::endl;
+        std::cout << "\n--- Tick " << loop + 1 << " ---" << std::endl;
         sem_wait(sem);
         for (int i = 0; i < 3; i++) {
             bool found = cache_get(shm_base, keys[i], val_buf, &ts);
@@ -44,6 +44,7 @@ int main() {
                 std::cout << "[Reader] GET " << keys[i] << " -> MISS" << std::endl;
             }
         }
+        cache_print_telemetry(shm_base);
         sem_post(sem);
         sleep(2);
     }
