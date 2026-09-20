@@ -26,7 +26,7 @@ bool SharedMemoryManager:: init_as_server(){
     return false;
     if(ftruncate(shm_fd, shm_size) == -1)
     return false;
-    //map the RAM into virtual address space of the processes
+     //map the RAM into virtual address space of the processes
     mapped_ptr = mmap(NULL, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if(mapped_ptr == MAP_FAILED)
     return false;

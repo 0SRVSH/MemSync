@@ -1,41 +1,55 @@
+// In this file we have defined the structural layout of database in RAM.
+
+// Created a "SlotState" system (EMPTY, OCCUPIED, DELETED) to handle record deletions cleanly.
+
+// Set up fixed sizes for keys (64 bytes) and values (256 bytes).
+
+// Declared all database operations (PUT, GET, UPDATE, DELETE).
+
 #ifndef CACHE_ENGINE_H
 #define CACHE_ENGINE_H
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
+#include <ctime>
 
-// 1. Fixed Configuration Limits
-constexpr size_t MAX_KEY_SIZE = 64;
-constexpr size_t MAX_VALUE_SIZE = 256;
-constexpr size_t TOTAL_SLOTS = 1024;
-constexpr uint32_t INVALID_OFFSET = 0xFFFFFFFF; // Replaces NULL pointer
+#define CACHE_MAGIC 0xDEADBEEF
+#define MAX_KEY_LEN 64
+#define MAX_VAL_LEN 256
 
-// Slot status flags
-enum SlotStatus : uint8_t {
-    SLOT_EMPTY = 0,
-    SLOT_OCCUPIED = 1,
-    SLOT_DELETED = 2
+// Slot state for linear probing tombstone handling
+// Instead of trying to remember random numbers—like whether 0 means empty, 1 means occupied, and 2 means deleted, an enum uses clear, readable words like EMPTY or OCCUPIED or DELETED
+enum class SlotState : uint8_t {
+    EMPTY = 0,
+    OCCUPIED = 1,
+    DELETED = 2
 };
 
-// 2. Individual Data Record Layout
-struct CacheEntry {
-    uint8_t status;                   // SLOT_EMPTY, SLOT_OCCUPIED, or SLOT_DELETED
-    char key[MAX_KEY_SIZE];           // Fixed-length string key
-    char value[MAX_VALUE_SIZE];       // Fixed-length string value
-    uint32_t next_offset;             // Byte offset to next slot (for collision chaining)
-};
+// We have used unsigned int as it guarantees the number can never be negative, and it is always the exact same size on any computer i.e. maintains Universal Consistency.
 
-// 3. Global Memory Header (Placed at byte 0 of shared memory)
 struct CacheHeader {
-    uint32_t total_slots;             // Maximum slots allocated
-    uint32_t used_slots;              // Currently occupied slots
-    uint32_t data_offset;             // Byte offset where CacheEntry array starts
+    uint32_t magic;          // Initialization of verification flag
+    uint32_t capacity;       // Maximum slot capacity
+    uint32_t entry_count;    // Active allocated entries
+    uint32_t data_offset;    // Byte offset where entry array begins
 };
 
-// 4. Function Prototypes
-uint32_t hash_key(const char* key);
-void init_cache_layout(void* shm_base);
+struct CacheEntry {
+    SlotState state;         // Slot state: EMPTY, OCCUPIED, or DELETED
+    char key[MAX_KEY_LEN];   // Key identifier
+    char value[MAX_VAL_LEN]; // Value payload
+    uint64_t timestamp;      // Unix timestamp of last update
+};
+
+// Function declarations
+uint32_t hash_key(const char* key, uint32_t capacity);
+CacheEntry* get_entry_ptr(void* shm_base, uint32_t index);
+int32_t find_slot(void* shm_base, const char* key);
+
 bool cache_put(void* shm_base, const char* key, const char* value);
-bool cache_get(void* shm_base, const char* key, char* out_value);
+bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_timestamp);
+bool cache_update(void* shm_base, const char* key, const char* new_value);
+bool cache_delete(void* shm_base, const char* key); // <--- NEW
 
 #endif // CACHE_ENGINE_H
