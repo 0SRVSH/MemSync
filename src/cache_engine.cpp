@@ -3,6 +3,8 @@
 #include <ctime>
 #include <iostream>
 #include <iomanip>
+#include <climits>
+
 
 bool cache_init_lock(CacheHeader* header) {
     if (!header) return false;
@@ -63,6 +65,37 @@ int32_t find_slot_internal(void* shm_base, const char* key) {
     return first_deleted_idx;
 }
 
+
+
+// LRU/Oldest Active Eviction helper (must be called under wrlock)
+static bool evict_oldest_lru(CacheHeader* header, void* shm_base) {
+    int32_t oldest_idx = -1;
+    uint64_t oldest_ts = UINT64_MAX;
+
+    for (uint32_t i = 0; i < header->capacity; i++) {
+        CacheEntry* entry = get_entry_ptr(shm_base, i);
+        if (entry->state == SlotState::OCCUPIED) {
+            if (entry->timestamp < oldest_ts) {
+                oldest_ts = entry->timestamp;
+                oldest_idx = i;
+            }
+        }
+    }
+
+    if (oldest_idx == -1) return false;
+
+    CacheEntry* oldest = get_entry_ptr(shm_base, oldest_idx);
+    oldest->state = SlotState::DELETED;
+    oldest->key[0] = '\0';
+    oldest->value[0] = '\0';
+    oldest->timestamp = 0;
+    oldest->ttl_seconds = 0;
+    if (header->entry_count > 0) {
+        header->entry_count--;
+    }
+    return true;
+}
+
 int32_t find_slot(void* shm_base, const char* key) {
     if (!shm_base) return -1;
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
@@ -72,15 +105,24 @@ int32_t find_slot(void* shm_base, const char* key) {
     return idx;
 }
 
-bool cache_put(void* shm_base, const char* key, const char* value) {
+bool cache_put_ttl(void* shm_base, const char* key, const char* value, uint32_t ttl_sec) {
     if (!shm_base || !key || !value) return false;
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
 
     pthread_rwlock_wrlock(&header->rwlock);
     int32_t slot_idx = find_slot_internal(shm_base, key);
+
+    // If no slot available, trigger active eviction (LRU oldest timestamp)
     if (slot_idx < 0) {
-        pthread_rwlock_unlock(&header->rwlock);
-        return false;
+        if (!evict_oldest_lru(header, shm_base)) {
+            pthread_rwlock_unlock(&header->rwlock);
+            return false;
+        }
+        slot_idx = find_slot_internal(shm_base, key);
+        if (slot_idx < 0) {
+            pthread_rwlock_unlock(&header->rwlock);
+            return false;
+        }
     }
 
     CacheEntry* entry = get_entry_ptr(shm_base, slot_idx);
@@ -96,8 +138,15 @@ bool cache_put(void* shm_base, const char* key, const char* value) {
     entry->value[MAX_VAL_LEN - 1] = '\0';
 
     entry->timestamp = static_cast<uint64_t>(std::time(nullptr));
+    entry->ttl_seconds = ttl_sec;
+
     pthread_rwlock_unlock(&header->rwlock);
     return true;
+}
+
+// Default standard PUT with infinite TTL (0)
+bool cache_put(void* shm_base, const char* key, const char* value) {
+    return cache_put_ttl(shm_base, key, value, 0);
 }
 
 bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_timestamp) {
@@ -118,6 +167,28 @@ bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_t
         }
         
         if (entry->state == SlotState::OCCUPIED && std::strcmp(entry->key, key) == 0) {
+            uint64_t now = static_cast<uint64_t>(std::time(nullptr));
+            // Check Lazy Expiration
+            if (entry->ttl_seconds > 0 && (now - entry->timestamp) > entry->ttl_seconds) {
+                pthread_rwlock_unlock(&header->rwlock);
+                
+                // Upgrade to write lock to lazily expire record
+                pthread_rwlock_wrlock(&header->rwlock);
+                if (entry->state == SlotState::OCCUPIED && std::strcmp(entry->key, key) == 0) {
+                    if (entry->ttl_seconds > 0 && (static_cast<uint64_t>(std::time(nullptr)) - entry->timestamp) > entry->ttl_seconds) {
+                        entry->state = SlotState::DELETED;
+                        entry->key[0] = '\0';
+                        entry->value[0] = '\0';
+                        entry->timestamp = 0;
+                        entry->ttl_seconds = 0;
+                        if (header->entry_count > 0) header->entry_count--;
+                    }
+                }
+                header->total_misses++;
+                pthread_rwlock_unlock(&header->rwlock);
+                return false;
+            }
+
             header->total_hits++;
             std::strncpy(out_value, entry->value, MAX_VAL_LEN - 1);
             out_value[MAX_VAL_LEN - 1] = '\0';
@@ -132,6 +203,8 @@ bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_t
     pthread_rwlock_unlock(&header->rwlock);
     return false;
 }
+
+
 
 bool cache_update(void* shm_base, const char* key, const char* new_value) {
     if (!shm_base || !key || !new_value) return false;

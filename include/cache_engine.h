@@ -30,6 +30,7 @@ struct CacheHeader {
     
     // Process-shared Reader-Writer Lock
     pthread_rwlock_t rwlock;
+
 };
 
 struct CacheEntry {
@@ -37,6 +38,7 @@ struct CacheEntry {
     char key[MAX_KEY_LEN];   // Key identifier
     char value[MAX_VAL_LEN]; // Value payload
     uint64_t timestamp;      // Unix timestamp of last update
+    uint32_t ttl_seconds; //Expiry duration in seconds (0 = infinite)
 };
 
 // Initialize process-shared rwlock attributes
@@ -52,5 +54,6 @@ bool cache_get(void* shm_base, const char* key, char* out_value, uint64_t* out_t
 bool cache_update(void* shm_base, const char* key, const char* new_value);
 bool cache_delete(void* shm_base, const char* key);
 void cache_print_telemetry(void* shm_base);
+bool cache_put_ttl(void* shm_base, const char* key, const char* value, uint32_t ttl_sec);
 
 #endif // CACHE_ENGINE_H
