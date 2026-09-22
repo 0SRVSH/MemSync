@@ -22,8 +22,8 @@ class SharedMemoryManager{
     ~SharedMemoryManager();
     bool init_as_server();
     bool attach_as_client();
-    void lock();    
-    void unlock();
+    bool lock();    
+    bool unlock();
     void *get_base_ptr();
     void cleanup();
 };
