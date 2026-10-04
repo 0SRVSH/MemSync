@@ -4,6 +4,43 @@ A high-performance, local inter-process communication (IPC) key-value cache prot
 
 When multiple processes on the same machine access a cache through sockets, each request may involve system calls, serialization, protocol handling, and additional data copying. For local processes, some of this overhead can be avoided. This project proposes a small proof of concept key value cache based on POSIX shared memory. 
 
+## 🚀 Build and Run (Linux / WSL)
+
+On Ubuntu or WSL, install CMake and a C++ compiler if needed:
+
+```bash
+sudo apt update
+sudo apt install cmake build-essential
+```
+
+From the repository root, configure and build:
+
+```bash
+cmake -S . -B build
+cmake --build build
+```
+
+To see the writer and reader share the cache, start the writer in one terminal:
+
+```bash
+./build/memsync_writer
+```
+
+Then, while the writer is running, start the reader in a second terminal:
+
+```bash
+./build/memsync_reader
+```
+
+The writer inserts sample entries, and the reader polls the shared cache. When both programs have finished, remove the shared-memory resource with:
+
+```bash
+./build/memsync_cleanup
+```
+
+The standalone cache demo can be run separately with `./build/memsync_test`. Do not run it at the same time as the writer or reader: it resets the shared-memory resource when it starts. The test and demo programs are currently manual demos, not an automated test suite.
+
+
 ---
 
 ## 🛠️ Tech Stack
@@ -12,7 +49,7 @@ When multiple processes on the same machine access a cache through sockets, each
 * **Environment:** Linux / WSL
 * **Database Concepts:** Record layout, hashing, indexing, key-value storage, timestamps, concurrency control
 * **Containerization / Build:** Docker, CMake, Git / GitHub
-* **Testing & Benchmarking:** GoogleTest, Google Benchmark
+* **Testing & Benchmarking:** Manual demo; automated tests and benchmarks are planned
 
 ---
 
@@ -56,26 +93,8 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
   * Fixed-size key and value buffers
   * Timestamps (creation/last-modified)
 * **Collision Resolution:** A deterministic hash function selects the initial slot, and linear probing handles collisions. Fixed-size records intentionally avoid the memory fragmentation and complexity of a general-purpose dynamic allocator.
-* **Concurrency Control:** A named POSIX semaphore (`sem_open`, `sem_wait`, `sem_post`) coordinates modifications to guarantee atomicity.
-* **Testing:** Comprehensive test suites cover multi-client access, hash collisions, repeated updates, capacity saturation, crash/cleanup recovery scenarios, and micro-benchmarks.
-
----
-
-## 🗺️ 4-Month Implementation Roadmap
-
-* **Month 1 — IPC Foundation:** 
-  * Initialize shared memory using `shm_open()`, `ftruncate()`, and `mmap()`.
-  * Establish basic inter-process communication by exchanging string buffers between two independent processes.
-* **Month 2 — Cache Engine:** 
-  * Design and implement slot structures, hash functions, and collision resolution (linear probing).
-  * Implement core operations (`PUT`, `GET`, `UPDATE`) and metadata/timestamps.
-* **Month 3 — Concurrency & Robustness:** 
-  * Integrate POSIX semaphore locking mechanisms for safe multi-client access.
-  * Develop multi-client integration tests, error checking, and cleanup/restart behavior handling.
-* **Month 4 — Evaluation & Demonstration:** 
-  * Run latency and throughput benchmarks.
-  * Compare performance against a simple IPC baseline.
-  * Document architectural limitations and prepare the final demonstration.
+* **Concurrency Control:** Cache operations use a process-shared POSIX reader-writer lock.
+* **Testing:** The current programs demonstrate basic cache operations and cleanup. Automated multi-client tests and performance benchmarks remain future work.
 
 ---
 
@@ -85,7 +104,7 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 * **Constraints:** Keys and values have strict fixed maximum sizes; cache total capacity is fixed at initialization.
 * **Trust Model:** Clients are trusted local processes sharing identical structure definitions and header contracts.
 * **Out of Scope:** Persistence across machine reboots, distributed/network clients, SQL support, replication, authentication, encryption, dynamic resizing, and production-grade fault tolerance.
-* **Design Trade-off:** A coarse-grained lock is prioritized initially to guarantee correctness and feasibility within the 4-month timeline.
+* **Design Trade-off:** Cache operations currently use a process-shared reader-writer lock.
 
 ---
 
@@ -100,13 +119,29 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 
 ---
 
-## 🗂️ Proposed Project Repository Structure
+## 🗂️ Project Repository Structure
 
 ```text
-├── include/          # Header files containing public interfaces, structs, and relative-offset memory layouts
-├── src/              # Implementation source files for the OS memory wrapper, database engine, server daemon, and client API
-├── tests/            # Multi-process concurrency validation scripts and automated stress testers
-├── docs/             # Architecture diagrams and design notes for mentor reviews
-├── CMakeLists.txt    # Unified build automation script so everyone compiles identically
-└── README.md         # Project overview, architecture breakdown, and compilation steps
-
+.
+├── CMakeLists.txt             # CMake build configuration
+├── README.md                  # Project overview and instructions
+├── LICENSE
+├── include/
+│   ├── cache_engine.h         # Cache data structures and operations
+│   ├── shared_memory.h        # Shared-memory manager interface
+│   └── include.txt            # Folder note
+├── src/
+│   ├── cache_engine.cpp       # Cache implementation
+│   ├── cleanup.cpp            # IPC resource cleanup program
+│   ├── main.cpp               # Cache demo/test program
+│   ├── reader.cpp             # Shared-cache reader example
+│   ├── shared_memory.cpp      # Shared-memory manager implementation
+│   ├── writer.cpp             # Shared-cache writer example
+│   └── src.txt                # Folder note
+├── tests/
+│   └── tests.txt              # Folder note; automated tests are not yet added
+├── docs/
+│   └── docs.txt               # Folder note; project documentation is not yet added
+├── memsync_reader            # Existing prebuilt executable
+├── memsync_test              # Existing prebuilt executable
+└── memsync_writer            # Existing prebuilt executable
