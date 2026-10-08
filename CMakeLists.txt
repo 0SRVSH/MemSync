@@ -37,3 +37,21 @@ add_executable(
     memsync_cleanup
     src/cleanup.cpp
 )
+
+include(CTest)
+
+if(BUILD_TESTING)
+    find_package(GTest REQUIRED)
+
+    add_executable(memsync_unit_tests
+        tests/cache_engine_test.cpp
+    )
+    target_link_libraries(memsync_unit_tests
+        PRIVATE
+        GTest::gtest_main
+        memsync_cache
+    )
+
+    include(GoogleTest)
+    gtest_discover_tests(memsync_unit_tests)
+endif()
