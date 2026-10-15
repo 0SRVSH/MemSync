@@ -44,7 +44,10 @@ if(BUILD_TESTING)
     find_package(GTest REQUIRED)
 
     add_executable(memsync_unit_tests
-        tests/cache_engine_test.cpp
+        tests/cache_crud_test.cpp
+        tests/cache_collision_test.cpp
+        tests/cache_ttl_test.cpp
+        tests/cache_capacity_test.cpp
     )
     target_link_libraries(memsync_unit_tests
         PRIVATE

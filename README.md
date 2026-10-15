@@ -6,11 +6,11 @@ When multiple processes on the same machine access a cache through sockets, each
 
 ## 🚀 Build and Run (Linux / WSL)
 
-On Ubuntu or WSL, install CMake and a C++ compiler if needed:
+On Ubuntu or WSL, install CMake, a C++ compiler, and GoogleTest:
 
 ```bash
 sudo apt update
-sudo apt install cmake build-essential
+sudo apt install cmake build-essential libgtest-dev
 ```
 
 From the repository root, configure and build:
@@ -38,7 +38,36 @@ The writer inserts sample entries, and the reader polls the shared cache. When b
 ./build/memsync_cleanup
 ```
 
-The standalone cache demo can be run separately with `./build/memsync_test`. Do not run it at the same time as the writer or reader: it resets the shared-memory resource when it starts. The test and demo programs are currently manual demos, not an automated test suite.
+The standalone cache demo can be run separately with `./build/memsync_test`. Do not run it at the same time as the writer or reader: it resets the shared-memory resource when it starts.
+
+## 🧪 Automated Tests
+
+The automated cache tests use GoogleTest and are run through CTest. After installing the dependencies and building the project as described above, run:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+CTest reports each test separately. `--output-on-failure` shows details for tests that fail.
+
+The current suite contains 12 tests:
+
+* `PutThenGetReturnsStoredValue`: a stored key returns its value and a nonzero timestamp.
+* `GetMissingKeyReturnsFalse`: looking up an absent key reports a miss.
+* `PuttingSameKeyReplacesValue`: putting an existing key replaces its value without increasing the entry count.
+* `UpdateChangesValue`: updating an existing key changes the value returned by a later lookup.
+* `UpdateMissingKeyReturnsFalse`: updating an absent key reports failure.
+* `DeleteRemovesKey`: deleting a stored key makes it unavailable and decrements the entry count.
+* `DeleteMissingKeyReturnsFalse`: deleting an absent key reports failure.
+* `CollidingKeysCanBothBeRetrieved`: two keys with the same initial hash can both be retrieved.
+* `ReusesDeletedSlotWithoutHidingCollidingKey`: a deleted collision slot can be reused while another colliding key remains findable.
+* `TtlValueCanBeReadBeforeExpiration`: a value with a TTL can be read before it expires.
+* `ExpiredTtlValueIsRemovedOnGet`: looking up an expired value reports a miss and removes it from the active count.
+* `InsertingPastCapacityEvictsOneEntry`: inserting into a full cache evicts one old entry and keeps the active count at capacity.
+
+The tests are grouped into `cache_crud_test.cpp`, `cache_collision_test.cpp`, `cache_ttl_test.cpp`, and `cache_capacity_test.cpp`, respectively.
+
+Each unit test gets a fresh in-memory cache using the shared test fixture in `cache_test_fixture.h`. These are cache-engine unit tests; automated multi-process integration tests and performance benchmarks have not been added yet.
 
 
 ---
@@ -49,7 +78,7 @@ The standalone cache demo can be run separately with `./build/memsync_test`. Do 
 * **Environment:** Linux / WSL
 * **Database Concepts:** Record layout, hashing, indexing, key-value storage, timestamps, concurrency control
 * **Containerization / Build:** Docker, CMake, Git / GitHub
-* **Testing & Benchmarking:** Manual demo; automated tests and benchmarks are planned
+* **Testing & Benchmarking:** GoogleTest and CTest for cache unit tests; performance benchmarks are planned
 
 ---
 
@@ -94,7 +123,7 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
   * Timestamps (creation/last-modified)
 * **Collision Resolution:** A deterministic hash function selects the initial slot, and linear probing handles collisions. Fixed-size records intentionally avoid the memory fragmentation and complexity of a general-purpose dynamic allocator.
 * **Concurrency Control:** Cache operations use a process-shared POSIX reader-writer lock.
-* **Testing:** The current programs demonstrate basic cache operations and cleanup. Automated multi-client tests and performance benchmarks remain future work.
+* **Testing:** GoogleTest unit tests cover cache operations, collisions, TTL, and capacity. Multi-process integration tests and performance benchmarks remain future work.
 
 ---
 
@@ -121,6 +150,8 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 
 ## 🗂️ Project Repository Structure
 
+Production headers belong in `include/`. The test fixture header is kept in `tests/` because it is only used by test code. CMake's generated `build/` directory is local build output and should not be committed.
+
 ```text
 .
 ├── CMakeLists.txt             # CMake build configuration
@@ -139,7 +170,11 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 │   ├── writer.cpp             # Shared-cache writer example
 │   └── src.txt                # Folder note
 ├── tests/
-│   └── tests.txt              # Folder note; automated tests are not yet added
+│   ├── cache_test_fixture.h   # Shared setup and cleanup for unit tests
+│   ├── cache_crud_test.cpp    # Cache operation tests
+│   ├── cache_collision_test.cpp # Hash collision and tombstone tests
+│   ├── cache_ttl_test.cpp     # TTL tests
+│   └── cache_capacity_test.cpp # Capacity and eviction test
 ├── docs/
 │   └── docs.txt               # Folder note; project documentation is not yet added
 ├── memsync_reader            # Existing prebuilt executable
