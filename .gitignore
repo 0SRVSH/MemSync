@@ -1,0 +1,6 @@
+/build/
+/.venv/
+/CMakeUserPresets.json
+/.vs/
+cmake-build-*/
+*.user

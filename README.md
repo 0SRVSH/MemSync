@@ -77,7 +77,7 @@ Each unit test gets a fresh in-memory cache using the shared test fixture in `ca
 * **Language:** C++
 * **Environment:** Linux / WSL
 * **Database Concepts:** Record layout, hashing, indexing, key-value storage, timestamps, concurrency control
-* **Containerization / Build:** Docker, CMake, Git / GitHub
+* **Build:** CMake
 * **Testing & Benchmarking:** GoogleTest and CTest for cache unit tests; performance benchmarks are planned
 
 ---
@@ -150,33 +150,27 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 
 ## 🗂️ Project Repository Structure
 
-Production headers belong in `include/`. The test fixture header is kept in `tests/` because it is only used by test code. CMake's generated `build/` directory is local build output and should not be committed.
+Production headers belong in `include/`. The test fixture header is kept in `tests/` because it is only used by test code. CMake's generated `build/` directory is local build output and is ignored by Git.
 
 ```text
 .
 ├── CMakeLists.txt             # CMake build configuration
+├── .gitignore                 # Local build and environment exclusions
 ├── README.md                  # Project overview and instructions
 ├── LICENSE
 ├── include/
 │   ├── cache_engine.h         # Cache data structures and operations
-│   ├── shared_memory.h        # Shared-memory manager interface
-│   └── include.txt            # Folder note
+│   └── shared_memory.h        # Shared-memory manager interface
 ├── src/
 │   ├── cache_engine.cpp       # Cache implementation
 │   ├── cleanup.cpp            # IPC resource cleanup program
 │   ├── main.cpp               # Cache demo/test program
 │   ├── reader.cpp             # Shared-cache reader example
 │   ├── shared_memory.cpp      # Shared-memory manager implementation
-│   ├── writer.cpp             # Shared-cache writer example
-│   └── src.txt                # Folder note
+│   └── writer.cpp             # Shared-cache writer example
 ├── tests/
 │   ├── cache_test_fixture.h   # Shared setup and cleanup for unit tests
 │   ├── cache_crud_test.cpp    # Cache operation tests
 │   ├── cache_collision_test.cpp # Hash collision and tombstone tests
 │   ├── cache_ttl_test.cpp     # TTL tests
 │   └── cache_capacity_test.cpp # Capacity and eviction test
-├── docs/
-│   └── docs.txt               # Folder note; project documentation is not yet added
-├── memsync_reader            # Existing prebuilt executable
-├── memsync_test              # Existing prebuilt executable
-└── memsync_writer            # Existing prebuilt executable
