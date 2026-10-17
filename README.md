@@ -69,6 +69,23 @@ The tests are grouped into `cache_crud_test.cpp`, `cache_collision_test.cpp`, `c
 
 Each unit test gets a fresh in-memory cache using the shared test fixture in `cache_test_fixture.h`. These are cache-engine unit tests; automated multi-process integration tests and performance benchmarks have not been added yet.
 
+## 🖥️ Streamlit Evaluator Console
+
+The optional Streamlit UI lets evaluators inspect the shared-memory cache, perform CRUD operations, and run the existing CTest cases without using a terminal. It runs in Linux/WSL, like the cache itself.
+
+After installing the project prerequisites and building it, install the UI dependency and start the app from the repository root:
+
+```bash
+python3 -m pip install -r ui/requirements.txt
+streamlit run ui/app.py
+```
+
+The CMake build creates `memsync_ui_bridge`, which the app uses to call the existing C++ cache engine. In **Cache Explorer**, evaluators can create keys (with optional TTL), read, update, and delete them, and view stored records and cache telemetry. Expired TTL entries are shown until a read lazily evicts them, matching the cache's current expiration behavior.
+
+In **Test Lab**, the UI discovers cases through CTest. Evaluators can select and run individual cases or subsets, or run all discovered tests. Results include pass/fail status, per-test duration, aggregate timing, and failure output.
+
+The UI uses the same `/memsync_shm` resource as `memsync_writer` and `memsync_reader`. Do not run the standalone `memsync_test` demo or `memsync_cleanup` while using the UI: the demo resets the cache, and cleanup removes its shared-memory resource. The bridge's **Initialize cache** action creates the cache if absent and leaves an already valid cache unchanged.
+
 
 ---
 

@@ -1,0 +1,2 @@
+# Dependencies for the Streamlit evaluator UI.
+streamlit>=1.30,<2

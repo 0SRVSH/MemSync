@@ -38,6 +38,12 @@ add_executable(
     src/cleanup.cpp
 )
 
+add_executable(
+    memsync_ui_bridge
+    src/ui_bridge.cpp
+)
+target_link_libraries(memsync_ui_bridge PRIVATE memsync_cache)
+
 include(CTest)
 
 if(BUILD_TESTING)
