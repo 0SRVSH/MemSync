@@ -31,6 +31,7 @@ protected:
 
         CacheHeader* header = static_cast<CacheHeader*>(shared_memory);
         header->magic = CACHE_MAGIC;
+        header->version = CACHE_VERSION;
         header->capacity = capacity;
         header->entry_count = 0;
         header->data_offset = sizeof(CacheHeader);

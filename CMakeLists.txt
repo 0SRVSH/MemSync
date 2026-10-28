@@ -6,12 +6,15 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(Threads REQUIRED)
+
 add_library(
     memsync_cache
     src/cache_engine.cpp
 )
 
 target_include_directories(memsync_cache PUBLIC include)
+target_link_libraries(memsync_cache PUBLIC Threads::Threads)
 
 add_executable(
     memsync_writer
@@ -37,6 +40,7 @@ add_executable(
     memsync_cleanup
     src/cleanup.cpp
 )
+target_link_libraries(memsync_cleanup PRIVATE memsync_cache)
 
 add_executable(
     memsync_ui_bridge
@@ -54,6 +58,7 @@ if(BUILD_TESTING)
         tests/cache_collision_test.cpp
         tests/cache_ttl_test.cpp
         tests/cache_capacity_test.cpp
+        tests/cache_shared_memory_test.cpp
     )
     target_link_libraries(memsync_unit_tests
         PRIVATE

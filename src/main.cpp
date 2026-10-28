@@ -1,109 +1,76 @@
+#include <cerrno>
 #include <iostream>
-#include <cstring>
-#include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
-#include <semaphore.h>
-#include <ctime>
-#include <cassert>
 #include "cache_engine.h"
 
-#define SHM_NAME "/memsync_shm"
-#define SEM_NAME "/memsync_sem"
-#define SHM_SIZE (4 * 1024 * 1024)
-
 int main() {
-    shm_unlink(SHM_NAME);
-    sem_unlink(SEM_NAME);
+    // This standalone demo intentionally resets the named cache on startup.
+    if (shm_unlink(cache_shared_memory_name()) == -1 && errno != ENOENT) {
+        perror("Could not reset the demo shared-memory cache");
+        return 1;
+    }
 
-    int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
-    if (shm_fd == -1) { perror("shm_open failed"); return 1; }
+    CacheMapping mapping;
+    if (!cache_open_shared(&mapping, true)) {
+        return 1;
+    }
 
-    if (ftruncate(shm_fd, SHM_SIZE) == -1) { perror("ftruncate failed"); return 1; }
-
-    void* shm_base = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (shm_base == MAP_FAILED) { perror("mmap failed"); return 1; }
-
-    CacheHeader* header = static_cast<CacheHeader*>(shm_base);
-    header->magic = CACHE_MAGIC;
-    header->capacity = 1000;
-    header->entry_count = 0;
-    header->data_offset = sizeof(CacheHeader);
-    header->total_hits = 0;
-    header->total_misses = 0;
-    header->total_collisions = 0;
-
-    std::memset(static_cast<uint8_t*>(shm_base) + header->data_offset, 0, header->capacity * sizeof(CacheEntry));
-    cache_init_lock(header);
-
-    sem_t* sem = sem_open(SEM_NAME, O_CREAT, 0666, 1);
-    if (sem == SEM_FAILED) { perror("sem_open failed"); return 1; }
-
+    void* shm_base = mapping.base;
     std::cout << "=== MemSync Engine Comprehensive Test ===" << std::endl;
 
-    // 1. Test PUT
-    sem_wait(sem);
-    cache_put(shm_base, "user:101", "Sarbesh Chatterjee - Lead");
-    sem_post(sem);
-    std::cout << "[PUT] Inserted 'user:101' (Active entries: " << header->entry_count << ")" << std::endl;
+    bool put_ok = cache_put(shm_base, "user:101", "Sarbesh Chatterjee - Lead");
+    std::cout << "[PUT] Inserted 'user:101': "
+              << (put_ok ? "SUCCESS" : "FAILED") << std::endl;
 
-    // 2. Test GET
-    char val_buffer[MAX_VAL_LEN];
-    uint64_t ts = 0;
-    sem_wait(sem);
-    bool get_ok = cache_get(shm_base, "user:101", val_buffer, &ts);
-    sem_post(sem);
-    if (get_ok) std::cout << "[GET] Found 'user:101': " << val_buffer << std::endl;
+    char value[MAX_VAL_LEN] = {};
+    uint64_t timestamp = 0;
+    bool get_ok = cache_get(shm_base, "user:101", value, &timestamp);
+    if (get_ok) {
+        std::cout << "[GET] Found 'user:101': " << value << std::endl;
+    }
 
-    // 3. Test DELETE (Tombstone creation)
-    sem_wait(sem);
-    bool del_ok = cache_delete(shm_base, "user:101");
-    sem_post(sem);
-    if (del_ok) std::cout << "[DELETE] Deleted 'user:101' (Active entries: " << header->entry_count << ")" << std::endl;
+    bool delete_ok = cache_delete(shm_base, "user:101");
+    std::cout << "[DELETE] user:101: "
+              << (delete_ok ? "SUCCESS" : "FAILED") << std::endl;
 
-    // 4. Test GET (Verify Cache Miss)
-    sem_wait(sem);
-    bool get_after_del = cache_get(shm_base, "user:101", val_buffer, &ts);
-    sem_post(sem);
-    if (!get_after_del) std::cout << "[GET] Key 'user:101' not found (Cache Miss - Correct)" << std::endl;
+    bool get_after_delete = cache_get(shm_base, "user:101", value, &timestamp);
+    if (!get_after_delete) {
+        std::cout << "[GET] user:101 is absent (cache miss)" << std::endl;
+    }
 
-    // 5. Test PUT (Reusing Tombstone Slot)
-    sem_wait(sem);
     bool reinsert_ok = cache_put(shm_base, "user:102", "Alex Vance - Dev");
-    sem_post(sem);
-    if (reinsert_ok) std::cout << "[PUT] Inserted 'user:102' reusing slot (Active entries: " << header->entry_count << ")" << std::endl;
+    std::cout << "[PUT] Inserted 'user:102': "
+              << (reinsert_ok ? "SUCCESS" : "FAILED") << std::endl;
 
-    // 6. Test Lazy Eviction with TTL = 2 seconds
-    sem_wait(sem);
-    cache_put_ttl(shm_base, "session:temp", "short_lived_token", 2);
-    sem_post(sem);
+    bool ttl_put_ok = cache_put_ttl(
+        shm_base,
+        "session:temp",
+        "short_lived_token",
+        2
+    );
+    bool found_early = cache_get(shm_base, "session:temp", value, &timestamp);
+    if (ttl_put_ok && found_early) {
+        std::cout << "[TTL Test] Initially found: " << value << std::endl;
+    }
 
-    sem_wait(sem);
-    bool found_early = cache_get(shm_base, "session:temp", val_buffer, &ts);
-    sem_post(sem);
-    if (found_early) std::cout << "[TTL Test] Initially found: " << val_buffer << std::endl;
-
-    std::cout << "[TTL Test] Sleeping for 3 seconds to trigger TTL expiry..." << std::endl;
+    std::cout << "[TTL Test] Sleeping for 3 seconds..." << std::endl;
     sleep(3);
 
-    sem_wait(sem);
-    bool found_late = cache_get(shm_base, "session:temp", val_buffer, &ts);
-    sem_post(sem);
-    if (!found_late) std::cout << "[TTL Test] Key expired and lazily evicted (Miss verified - OK)" << std::endl;
+    bool found_late = cache_get(shm_base, "session:temp", value, &timestamp);
+    if (!found_late) {
+        std::cout << "[TTL Test] Expired key was lazily removed." << std::endl;
+    }
 
-    // Print Telemetry
-    sem_wait(sem);
     cache_print_telemetry(shm_base);
-    sem_post(sem);
+    cache_close_shared(&mapping);
 
-    // Cleanup
-    sem_close(sem);
-    sem_unlink(SEM_NAME);
-    munmap(shm_base, SHM_SIZE);
-    close(shm_fd);
-    shm_unlink(SHM_NAME);
+    if (shm_unlink(cache_shared_memory_name()) == -1) {
+        perror("Could not remove the demo shared-memory cache");
+        return 1;
+    }
 
-    std::cout << "=== Comprehensive Test Completed Successfully ===" << std::endl;
+    std::cout << "=== Comprehensive Test Completed Successfully ==="
+              << std::endl;
     return 0;
 }

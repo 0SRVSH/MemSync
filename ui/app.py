@@ -158,7 +158,7 @@ with cache_tab:
                     {
                         "Key": item["key"],
                         "Value": item["value"],
-                        "Last updated (UTC)": time.strftime(
+                        "Last inserted/updated (UTC)": time.strftime(
                             "%Y-%m-%d %H:%M:%S", time.gmtime(item["timestamp"])
                         ),
                         "TTL (seconds)": item["ttl_seconds"] or "Never expires",
@@ -207,7 +207,7 @@ with cache_tab:
                         response = call_bridge(build_dir, "get", key)
                         if response["found"]:
                             st.success(f"Value: {response['value']}")
-                            st.caption(f"Last updated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(response['timestamp']))}")
+                            st.caption(f"Last inserted/updated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(response['timestamp']))}")
                         else:
                             st.warning("Cache miss: key not found or expired.")
                     except (FileNotFoundError, RuntimeError) as error:

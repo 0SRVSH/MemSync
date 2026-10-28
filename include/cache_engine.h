@@ -8,8 +8,12 @@
 #include <pthread.h>
 
 #define CACHE_MAGIC 0xDEADBEEF
+#define CACHE_VERSION 1
 #define MAX_KEY_LEN 64
 #define MAX_VAL_LEN 256
+
+static const size_t CACHE_SHARED_MEMORY_SIZE = 4 * 1024 * 1024;
+static const uint32_t CACHE_DEFAULT_CAPACITY = 1000;
 
 enum class SlotState : uint8_t {
     EMPTY = 0,
@@ -19,6 +23,7 @@ enum class SlotState : uint8_t {
 
 struct CacheHeader {
     uint32_t magic;          // Initialization verification flag
+    uint32_t version;        // Shared-memory layout version
     uint32_t capacity;       // Maximum slot capacity
     uint32_t entry_count;    // Active allocated entries
     uint32_t data_offset;    // Byte offset where entry array begins
@@ -37,12 +42,29 @@ struct CacheEntry {
     SlotState state;         // Slot state: EMPTY, OCCUPIED, or DELETED
     char key[MAX_KEY_LEN];   // Key identifier
     char value[MAX_VAL_LEN]; // Value payload
-    uint64_t timestamp;      // Unix timestamp of last update
-    uint32_t ttl_seconds; //Expiry duration in seconds (0 = infinite)
+    uint64_t timestamp;      // Unix time of most recent insertion or update; reads do not refresh it
+    uint32_t ttl_seconds;    // Expiration duration; 0 means no expiry
+};
+
+struct CacheMapping {
+    int fd;
+    void* base;
+    size_t size;
+    bool created;
 };
 
 // Initialize process-shared rwlock attributes
 bool cache_init_lock(CacheHeader* header);
+bool cache_initialize_region(void* shm_base, size_t size, uint32_t capacity);
+bool cache_validate_layout(const void* shm_base, size_t size);
+bool cache_entry_expired(const CacheEntry& entry, uint64_t now);
+const char* cache_shared_memory_name();
+bool cache_open_shared(
+    CacheMapping* mapping,
+    bool create_if_missing,
+    const char* shared_memory_name = nullptr
+);
+void cache_close_shared(CacheMapping* mapping);
 
 // Function declarations
 uint32_t hash_key(const char* key, uint32_t capacity);
