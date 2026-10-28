@@ -34,6 +34,11 @@ def bridge_path(build_dir):
     return build_dir / executable
 
 
+def cleanup_path(build_dir):
+    executable = "memsync_cleanup.exe" if sys.platform == "win32" else "memsync_cleanup"
+    return build_dir / executable
+
+
 def call_bridge(build_dir, *arguments):
     executable = bridge_path(build_dir)
     if not executable.is_file():
@@ -50,6 +55,23 @@ def call_bridge(build_dir, *arguments):
         return json.loads(result.stdout)
     except json.JSONDecodeError as error:
         raise RuntimeError(f"Cache bridge returned invalid output: {error}") from error
+
+
+def cleanup_cache(build_dir):
+    executable = cleanup_path(build_dir)
+    if not executable.is_file():
+        raise FileNotFoundError(
+            f"Cache cleanup utility not found at {executable}. Configure and build the project first."
+        )
+    try:
+        result = run_command([str(executable)])
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Cache cleanup timed out after 30 seconds.") from error
+    if result.returncode != 0:
+        raise RuntimeError(
+            result.stderr.strip() or result.stdout.strip() or "Cache cleanup failed."
+        )
+    return result.stdout.strip() or "Cache cleanup completed."
 
 
 def ctest_executable():
@@ -127,12 +149,47 @@ with st.sidebar:
             response = call_bridge(build_dir, "init")
             st.session_state["cache_notice"] = response["message"]
             st.session_state.pop("cache_error", None)
+            st.session_state.pop("cache_cleanup_notice", None)
         except (FileNotFoundError, RuntimeError) as error:
             st.session_state["cache_error"] = str(error)
     if st.session_state.get("cache_error"):
         st.error(st.session_state["cache_error"])
     elif st.session_state.get("cache_notice"):
         st.success(st.session_state["cache_notice"])
+    if st.session_state.get("cache_cleanup_error"):
+        st.error(st.session_state["cache_cleanup_error"])
+    elif st.session_state.get("cache_cleanup_notice"):
+        st.info(st.session_state["cache_cleanup_notice"])
+
+    with st.expander("Danger zone: destroy shared-memory cache"):
+        st.warning(
+            "Stop the writer, reader, demo, and any other cache clients before cleanup. "
+            "Unlinking does not close mappings that are already open; if a client remains "
+            "connected while another process initializes a cache, they may use different cache objects."
+        )
+        clients_stopped = st.checkbox(
+            "I have stopped all cache clients.",
+            key="confirm_cache_clients_stopped",
+        )
+        confirmation = st.text_input(
+            "Type UNLINK to confirm",
+            key="confirm_cache_unlink_text",
+        )
+        if st.button(
+            "Destroy shared-memory cache",
+            disabled=not (clients_stopped and confirmation == "UNLINK"),
+            use_container_width=True,
+        ):
+            try:
+                st.session_state["cache_cleanup_notice"] = cleanup_cache(build_dir)
+                st.session_state.pop("cache_cleanup_error", None)
+                st.session_state.pop("cache_notice", None)
+                st.session_state.pop("cache_error", None)
+                st.info(st.session_state["cache_cleanup_notice"])
+            except (FileNotFoundError, RuntimeError, OSError) as error:
+                st.session_state["cache_cleanup_error"] = str(error)
+                st.session_state.pop("cache_cleanup_notice", None)
+                st.error(st.session_state["cache_cleanup_error"])
 
 
 cache_tab, tests_tab = st.tabs(["Cache Explorer", "Test Lab"])

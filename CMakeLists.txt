@@ -58,7 +58,6 @@ if(BUILD_TESTING)
         tests/cache_collision_test.cpp
         tests/cache_ttl_test.cpp
         tests/cache_capacity_test.cpp
-        tests/cache_shared_memory_test.cpp
     )
     target_link_libraries(memsync_unit_tests
         PRIVATE
@@ -67,5 +66,37 @@ if(BUILD_TESTING)
     )
 
     include(GoogleTest)
-    gtest_discover_tests(memsync_unit_tests)
+    gtest_discover_tests(memsync_unit_tests
+        PROPERTIES
+        LABELS "unit"
+        TIMEOUT 20
+    )
+
+    add_executable(memsync_integration_tests
+        tests/cache_shared_memory_test.cpp
+    )
+    target_link_libraries(memsync_integration_tests
+        PRIVATE
+        GTest::gtest_main
+        memsync_cache
+    )
+    gtest_discover_tests(memsync_integration_tests
+        PROPERTIES
+        LABELS "integration"
+        TIMEOUT 30
+    )
 endif()
+
+add_executable(memsync_benchmark
+    bench/cache_benchmark.cpp
+)
+target_link_libraries(memsync_benchmark PRIVATE memsync_cache Threads::Threads)
+
+if(CMAKE_BUILD_TYPE)
+    set(MEMSYNC_BUILD_TYPE_VALUE "${CMAKE_BUILD_TYPE}")
+else()
+    set(MEMSYNC_BUILD_TYPE_VALUE "unspecified")
+endif()
+target_compile_definitions(memsync_benchmark
+    PRIVATE "MEMSYNC_BUILD_TYPE=\"${MEMSYNC_BUILD_TYPE_VALUE}\""
+)

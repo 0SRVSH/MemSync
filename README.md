@@ -1,6 +1,6 @@
 # MemSync : POSIX Shared-Memory Key-Value Cache
 
-A high-performance, local inter-process communication (IPC) key-value cache prototype built with C++ and POSIX shared memory.
+A local inter-process communication (IPC) key-value cache prototype built with C++ and POSIX shared memory.
 
 When multiple processes on the same machine access a cache through sockets, each request may involve system calls, serialization, protocol handling, and additional data copying. For local processes, some of this overhead can be avoided. This project proposes a small proof of concept key value cache based on POSIX shared memory. 
 
@@ -50,36 +50,29 @@ ctest --test-dir build --output-on-failure
 
 CTest reports each test separately. `--output-on-failure` shows details for tests that fail.
 
-The current suite contains 24 tests:
+The CTest suite is split by purpose. Unit tests use a fresh in-memory cache and cover CRUD, input limits, collisions/tombstones, TTL, capacity/eviction, telemetry, and concurrent mutation invariants. Process integration tests use unique POSIX shared-memory names and cover concurrent initialization, cross-process value and TTL visibility, colliding mixed operations, full-capacity inserts, attach failures, persistence across reattachment, and unlink behavior. Child processes have bounded waits and tests clean up only the resources they created.
 
-* `PutThenGetReturnsStoredValue`: a stored key returns its value and a nonzero timestamp.
-* `GetMissingKeyReturnsFalse`: looking up an absent key reports a miss.
-* `PuttingSameKeyReplacesValue`: putting an existing key replaces its value without increasing the entry count.
-* `UpdateChangesValue`: updating an existing key changes the value returned by a later lookup.
-* `UpdateMissingKeyReturnsFalse`: updating an absent key reports failure.
-* `DeleteRemovesKey`: deleting a stored key makes it unavailable and decrements the entry count.
-* `DeleteMissingKeyReturnsFalse`: deleting an absent key reports failure.
-* `CollidingKeysCanBothBeRetrieved`: two keys with the same initial hash can both be retrieved.
-* `ReusesDeletedSlotWithoutHidingCollidingKey`: a deleted collision slot can be reused while another colliding key remains findable.
-* `TtlValueCanBeReadBeforeExpiration`: a value with a TTL can be read before it expires.
-* `ExpiredTtlValueIsRemovedOnGet`: looking up an expired value reports a miss and removes it from the active count.
-* `ConcurrentGetsCountEveryHitAndMissExactlyOnce`: concurrent successful and unsuccessful lookups produce exact hit/miss totals.
-* `InitializationPublishesAValidVersionedLayout`: cache initialization creates a valid versioned layout that passes attachment validation.
-* `ConcurrentProcessesPublishOneUsableCache`: concurrent processes publish exactly one initialized cache and all attachers can safely store records.
-* `AttachingToPartialCacheFailsBeforeLockUse`: an existing but unpublished cache is rejected without touching its uninitialized lock.
-* `ReopeningValidCachePreservesExistingRecords`: opening an already valid cache does not reinitialize or clear its records.
-* `ConcurrentCollisionLookupsUpdateTelemetrySafely`: concurrent lookups of colliding keys produce exact collision telemetry.
-* `ExpirationBoundaryIsInclusive`: a TTL entry expires when elapsed time is greater than or equal to its TTL.
-* `ConcurrentExpiredGetsCountEachMissAndRemoveOnce`: concurrent expiration races count each miss and remove the record only once.
-* `UpdateRejectsExpiredEntryWithoutHidingCollisions`: update cannot revive an expired entry or hide a later colliding key.
-* `SuccessfulUpdateRefreshesTimestampAndRetainsTtl`: update refreshes the timestamp while retaining the TTL duration.
-* `InsertingPastCapacityEvictsOldestWriteEntry`: inserting into a full cache evicts the entry with the oldest insertion/update timestamp.
-* `ExpiredEntryIsReclaimedBeforeEvictingLiveEntry`: insertion reclaims an expired entry before evicting any live entry.
-* `EqualTimestampsEvictTheLowestOccupiedSlot`: equal eviction timestamps are resolved deterministically by slot index.
+Run only the fast unit suite, only process integration tests, or both:
 
-The tests are grouped into `cache_crud_test.cpp`, `cache_collision_test.cpp`, `cache_ttl_test.cpp`, `cache_capacity_test.cpp`, and `cache_shared_memory_test.cpp`.
+```bash
+ctest --test-dir build -L unit --output-on-failure
+ctest --test-dir build -L integration --output-on-failure
+ctest --test-dir build --output-on-failure
+```
 
-Cache-operation tests use a fresh in-memory cache via `cache_test_fixture.h`; shared-memory integration tests use unique temporary POSIX object names and clean them up. The suite covers thread-concurrent telemetry and multi-process startup, but not performance benchmarks.
+The supported cache API requires non-empty keys of at most 63 bytes and values of at most 255 bytes. Empty values are valid. TTL `0` means no expiration; otherwise an entry expires when elapsed time is greater than or equal to its TTL. Updating a live key refreshes its timestamp and restarts the same TTL duration. At capacity, expired entries are reclaimed first; otherwise the oldest insertion/update timestamp is evicted, with the lowest slot index breaking timestamp ties.
+
+### Opt-in performance benchmark
+
+`memsync_benchmark` compares cache operations with a local Unix-domain `socketpair` request/response cache. It measures GET hits, GET misses, PUT/update, and mixed workloads using 16-, 128-, and 255-byte values at one and four client threads. Each row reports operation count, failures, median/p95/p99 per-operation latency, throughput, and host/compiler/build metadata. Setup, warm-up, and socket/thread startup are excluded from measured operation latencies. The benchmark is opt-in and does not affect CTest pass/fail.
+
+```bash
+mkdir -p bench/results
+./build/memsync_benchmark --operations 2000 --trials 3 \
+  > bench/results/benchmark.csv 2> bench/results/benchmark-summary.txt
+```
+
+The `bench/results/` directory is ignored by Git because benchmark reports vary by machine and run. Use the CSV and summary together with the command and environment when publishing results. The socketpair baseline and workloads are intended for local comparative measurements; do not infer a general performance advantage without repeated runs and interpretation of the results.
 
 ## 🖥️ Streamlit Evaluator Console
 
@@ -92,15 +85,17 @@ python3 -m pip install -r ui/requirements.txt
 streamlit run ui/app.py
 ```
 
-The CMake build creates `memsync_ui_bridge`, which the app uses to call the existing C++ cache engine. In **Cache Explorer**, evaluators can create keys (with optional TTL), read, update, and delete them, and view stored records and cache telemetry. TTL entries expire when elapsed time is greater than or equal to the TTL. Expired entries remain listed until a read lazily removes them or capacity pressure reclaims them. Updates fail for expired entries; a successful update refreshes the timestamp and restarts the existing TTL duration.
+The CMake build creates `memsync_ui_bridge` and `memsync_cleanup`, which the app uses to call the existing C++ cache engine and cleanup utility. In **Cache Explorer**, evaluators can create keys (with optional TTL), read, update, and delete them, and view stored records and cache telemetry. TTL entries expire when elapsed time is greater than or equal to the TTL. Expired entries remain listed until a read lazily removes them or capacity pressure reclaims them. Updates fail for expired entries; a successful update refreshes the timestamp and restarts the existing TTL duration.
+
+The sidebar's **Danger zone: destroy shared-memory cache** runs the same cleanup utility as `./build/memsync_cleanup`. To reduce accidental cleanup, it requires checking that all cache clients have stopped and typing `UNLINK`. POSIX shared memory does not provide a reliable way for the UI to confirm that no other process has an open mapping, so this is an operator-confirmed safety guard, not automatic detection. Do not initialize a new cache until all previous clients are stopped.
 
 In **Test Lab**, the UI discovers cases through CTest. Evaluators can select and run individual cases or subsets, or run all discovered tests. Results include pass/fail status, per-test duration, aggregate timing, and failure output.
 
-The UI uses the same `/memsync_shm` resource as `memsync_writer` and `memsync_reader`. The process that creates the object initializes its versioned header, entries, and process-shared reader-writer lock before publishing the ready marker. Attachments validate the object size and layout before accessing the lock; an attachment that races initialization receives a retryable error. The bridge's **Initialize cache** action creates the cache if absent and leaves an already valid cache and its records unchanged.
+The UI uses the same `/memsync_shm` resource as `memsync_writer` and `memsync_reader`. Its lifecycle is absent → exclusively created/unpublished → ready → attached; a partial or invalid object is never treated as ready. The process that wins `O_CREAT | O_EXCL` alone sizes and initializes the versioned header, slots, and process-shared reader-writer lock, then publishes the ready marker last. Attachers validate the exact object size and layout before accessing the lock and fail with a retryable error if initialization is still in progress. Existing valid caches are attached without reset. The bridge's **Initialize cache** action creates the cache if absent and leaves an already valid cache and its records unchanged.
 
-The cache uses only the process-shared `pthread_rwlock_t` in its shared header for synchronization. `src/shared_memory.cpp` and `include/shared_memory.h` are unused legacy semaphore-manager code and are not part of the supported build. Cache creators initialize but do not unlink the named object on exit; each process closes its own mapping, and `memsync_cleanup` is the explicit unlink operation. Run cleanup only after all cache clients have exited: unlinking while clients remain attached can split them from processes that later create a new object. The shared layout is versioned, so incompatible or partially initialized objects must be removed with cleanup before reinitializing.
+The cache uses only the process-shared `pthread_rwlock_t` in its shared header for synchronization. `legacy/shared_memory.cpp` and `legacy/shared_memory.h` contain the unused semaphore-manager prototype and are not part of the supported build. Creators and clients close only their own mappings; creator exit does not unlink the named object. `memsync_cleanup` explicitly unlinks the name and is idempotent when it is absent. Unlinking does not invalidate mappings already held by clients, but a later creator can create a different object under the same name; run cleanup only after all clients have exited. A crash or initialization failure can leave an invalid object. It is not automatically reinitialized and its lock is never guessed to be safe to reset; after confirming no clients remain, use cleanup before restarting. The standalone `memsync_test` demo intentionally unlinks the named cache on startup and exit, so never run it alongside writer, reader, or UI clients.
 
-Telemetry counts one hit or miss for every valid `GET` query. The collision counter counts each extra slot inspected during hash-table searches by cache operations; it excludes direct `find_slot` helper calls. Counter writes use the exclusive rwlock, while telemetry snapshots use the shared lock.
+Telemetry counts one hit or miss for every valid `GET` query. The collision counter counts each extra slot inspected during hash-table searches by cache operations; it excludes direct `find_slot` helper calls. Counter writes use the exclusive rwlock, while telemetry snapshots use the shared lock. Timestamps are Unix seconds for the most recent insertion or successful update—not creation time or last access time. A process that dies while holding the non-robust process-shared rwlock can leave the cache unavailable; automatic lock recovery is not supported.
 
 
 ---
@@ -111,7 +106,7 @@ Telemetry counts one hit or miss for every valid `GET` query. The collision coun
 * **Environment:** Linux / WSL
 * **Database Concepts:** Record layout, hashing, indexing, key-value storage, timestamps, concurrency control
 * **Build:** CMake
-* **Testing & Benchmarking:** GoogleTest and CTest for cache unit tests; performance benchmarks are planned
+* **Testing & Benchmarking:** GoogleTest/CTest unit and process integration tests; opt-in shared-memory vs. local Unix-domain socket benchmark
 
 ---
 
@@ -124,7 +119,7 @@ Modern applications frequently use in-memory caches to reduce database access la
 
 For local processes residing on the same host, this overhead can be largely avoided. This project proposes a proof-of-concept local key-value cache leveraging **POSIX shared memory**. 
 
-Independent processes map the same underlying physical memory region using `shm_open()` and `mmap()`, allowing them to access shared cached records directly with minimal latency. Robust synchronization primitives protect concurrent updates across processes.
+Independent processes map the same underlying physical memory region using `shm_open()` and `mmap()`, allowing them to access shared cached records directly. A process-shared reader-writer lock coordinates access. Comparative performance is measured by an opt-in benchmark; no general speed advantage is assumed.
 
 ### Core Objectives
 This project bridges **Operating Systems** concepts (shared memory, IPC, memory mapping, synchronization, process isolation, and resource cleanup) with **Database Management System (DBMS)** concepts (record layout, hashing, indexing, key-value storage, timestamps, and concurrency control). 
@@ -140,7 +135,7 @@ This project bridges **Operating Systems** concepts (shared memory, IPC, memory 
 3. **Operations Support:** Provide thread-safe and process-safe `PUT`, `GET`, and `UPDATE` operations.
 4. **Pointer Independence:** Utilize relative offsets or array indices instead of process-specific absolute pointers within shared structures.
 5. **Lifecycle Management:** Provide explicit cleanup and restart handling for the named shared-memory cache.
-6. **Performance Benchmarking:** Quantify latency and throughput improvements against local IPC baselines.
+6. **Performance Benchmarking:** Measure latency and throughput against a local IPC baseline.
 
 ---
 
@@ -157,15 +152,15 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 * **TTL and Capacity:** Entries expire when elapsed time is greater than or equal to the TTL. A successful update refreshes the timestamp while retaining the TTL duration. At capacity, expired entries are reclaimed first; otherwise the oldest insertion/update timestamp is evicted. Equal timestamps are resolved by the lowest occupied slot index.
 * **Collision Resolution:** A deterministic hash function selects the initial slot, and linear probing handles collisions. Fixed-size records intentionally avoid the memory fragmentation and complexity of a general-purpose dynamic allocator.
 * **Concurrency Control:** Cache operations use the process-shared POSIX reader-writer lock stored in the header. Lookup results are copied while holding a read lock; telemetry is updated afterward under an exclusive lock. Hits and misses count `GET` operations, and collisions count extra slots inspected by cache operation searches.
-* **Resource Ownership:** The exclusive creator initializes the cache, all clients close their own mappings, and the cleanup utility unlinks the name only when no clients remain active. The unused semaphore manager is legacy code and is excluded from the build.
-* **Testing:** GoogleTest unit tests cover operations, thread-concurrent telemetry, collisions, TTL, initialization layout, and capacity policy. Multi-process integration tests and performance benchmarks remain future work.
+* **Resource Ownership:** The exclusive creator initializes the cache, all clients close their own mappings, and an operator runs cleanup only after clients exit. The cleanup utility does not detect active clients. The unused semaphore manager is legacy code and is excluded from the build.
+* **Testing:** GoogleTest/CTest separates deterministic unit tests from bounded process integration tests. An opt-in benchmark reports per-operation latency distributions and throughput against a Unix-domain socketpair baseline. Comparative performance claims remain unverified until repeated benchmark runs are interpreted and published.
 
 ---
 
 ## 📋 Assumptions & Scope
 
 * **Environment:** Runs on a single Linux/WSL machine with native POSIX shared-memory and process-shared reader-writer lock support.
-* **Constraints:** Keys and values have strict fixed maximum sizes; cache total capacity is fixed at initialization.
+* **Constraints:** Non-empty keys are limited to 63 bytes, values to 255 bytes (empty values are allowed), and cache capacity is fixed at initialization.
 * **Trust Model:** Clients are trusted local processes sharing identical structure definitions and header contracts.
 * **Out of Scope:** Persistence across machine reboots, distributed/network clients, SQL support, replication, authentication, encryption, dynamic resizing, and production-grade fault tolerance.
 * **Design Trade-off:** Cache operations currently use one process-shared reader-writer lock; named semaphores are not part of the supported architecture.
@@ -185,27 +180,36 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 
 ## 🗂️ Project Repository Structure
 
-Production headers belong in `include/`. The test fixture header is kept in `tests/` because it is only used by test code. CMake's generated `build/` directory is local build output and is ignored by Git.
+Supported production headers belong in `include/`; the unbuilt semaphore prototype is kept under `legacy/`. The test fixture header is kept in `tests/` because it is only used by test code. CMake's generated `build/` directory, Python virtual environments, and machine-specific benchmark reports are local output and ignored by Git.
 
 ```text
 .
-├── CMakeLists.txt             # CMake build configuration
+├── CMakeLists.txt             # CMake build configuration and labeled test targets
 ├── .gitignore                 # Local build and environment exclusions
 ├── README.md                  # Project overview and instructions
 ├── LICENSE
 ├── include/
-│   ├── cache_engine.h         # Cache data structures and operations
-│   └── shared_memory.h        # Shared-memory manager interface
+│   └── cache_engine.h         # Cache data structures and operations
+├── legacy/
+│   ├── shared_memory.h        # Unused semaphore-manager prototype interface
+│   └── shared_memory.cpp      # Unused semaphore-manager prototype (not built)
 ├── src/
 │   ├── cache_engine.cpp       # Cache implementation
 │   ├── cleanup.cpp            # IPC resource cleanup program
 │   ├── main.cpp               # Cache demo/test program
 │   ├── reader.cpp             # Shared-cache reader example
-│   ├── shared_memory.cpp      # Unused legacy semaphore manager (not built)
+│   ├── ui_bridge.cpp          # CLI bridge used by the Streamlit UI
 │   └── writer.cpp             # Shared-cache writer example
 ├── tests/
 │   ├── cache_test_fixture.h   # Shared setup and cleanup for unit tests
 │   ├── cache_crud_test.cpp    # Cache operation tests
 │   ├── cache_collision_test.cpp # Hash collision and tombstone tests
 │   ├── cache_ttl_test.cpp     # TTL tests
-│   └── cache_capacity_test.cpp # Capacity and eviction test
+│   ├── cache_capacity_test.cpp # Capacity and eviction tests
+│   └── cache_shared_memory_test.cpp # Process integration tests
+├── ui/
+│   ├── app.py                  # Streamlit evaluator console
+│   └── requirements.txt        # UI Python dependencies
+└── bench/
+    ├── cache_benchmark.cpp    # Opt-in shared-memory and local-socket benchmark
+    └── results/               # Generated, ignored local CSV and summary output

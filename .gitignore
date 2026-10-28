@@ -1,6 +1,8 @@
 /build/
 /.venv/
+/.venv-ui/
 /CMakeUserPresets.json
 /.vs/
 cmake-build-*/
 *.user
+/bench/results/

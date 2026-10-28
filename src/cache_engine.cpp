@@ -14,10 +14,36 @@ namespace {
 
 const char* const SHM_NAME = "/memsync_shm";
 
+void unlink_created_object(const char* name) {
+    if (shm_unlink(name) == -1 && errno != ENOENT) {
+        perror("Could not unlink failed shared-memory cache creation");
+    }
+}
+
+void close_descriptor(int fd) {
+    if (close(fd) == -1) {
+        perror("Could not close shared-memory cache descriptor");
+    }
+}
+
+void unmap_region(void* base, size_t size) {
+    if (munmap(base, size) == -1) {
+        perror("Could not unmap shared-memory cache");
+    }
+}
+
 bool valid_capacity(size_t size, uint32_t capacity) {
     return size >= sizeof(CacheHeader) &&
            capacity > 0 &&
            capacity <= (size - sizeof(CacheHeader)) / sizeof(CacheEntry);
+}
+
+bool valid_key_argument(const char* key) {
+    return key && key[0] != '\0' && std::strlen(key) < MAX_KEY_LEN;
+}
+
+bool valid_value_argument(const char* value) {
+    return value && std::strlen(value) < MAX_VAL_LEN;
 }
 
 bool lock_for_read(CacheHeader* header) {
@@ -268,21 +294,21 @@ bool cache_open_shared(
     if (created) {
         if (ftruncate(fd, static_cast<off_t>(CACHE_SHARED_MEMORY_SIZE)) == -1) {
             perror("Could not size newly created shared-memory cache");
-            close(fd);
-            shm_unlink(name);
+            close_descriptor(fd);
+            unlink_created_object(name);
             return false;
         }
     } else {
         struct stat info;
         if (fstat(fd, &info) == -1) {
             perror("Could not inspect shared-memory cache");
-            close(fd);
+            close_descriptor(fd);
             return false;
         }
-        if (info.st_size < static_cast<off_t>(CACHE_SHARED_MEMORY_SIZE)) {
+        if (info.st_size != static_cast<off_t>(CACHE_SHARED_MEMORY_SIZE)) {
             std::cerr << "Shared-memory cache is not ready or has an invalid size; "
                          "retry after initialization completes.\n";
-            close(fd);
+            close_descriptor(fd);
             return false;
         }
     }
@@ -297,9 +323,9 @@ bool cache_open_shared(
     );
     if (base == MAP_FAILED) {
         perror("Could not map shared-memory cache");
-        close(fd);
+        close_descriptor(fd);
         if (created) {
-            shm_unlink(name);
+            unlink_created_object(name);
         }
         return false;
     }
@@ -310,16 +336,16 @@ bool cache_open_shared(
                 CACHE_SHARED_MEMORY_SIZE,
                 CACHE_DEFAULT_CAPACITY)) {
             std::cerr << "Could not initialize shared-memory cache.\n";
-            munmap(base, CACHE_SHARED_MEMORY_SIZE);
-            close(fd);
-            shm_unlink(name);
+            unmap_region(base, CACHE_SHARED_MEMORY_SIZE);
+            close_descriptor(fd);
+            unlink_created_object(name);
             return false;
         }
     } else if (!validate_ready_header(base, CACHE_SHARED_MEMORY_SIZE)) {
         std::cerr << "Shared-memory cache is initializing or has an invalid "
                      "header/layout; retry after initialization completes.\n";
-        munmap(base, CACHE_SHARED_MEMORY_SIZE);
-        close(fd);
+        unmap_region(base, CACHE_SHARED_MEMORY_SIZE);
+        close_descriptor(fd);
         return false;
     }
 
@@ -334,10 +360,10 @@ void cache_close_shared(CacheMapping* mapping) {
         return;
     }
     if (mapping->base && mapping->base != MAP_FAILED) {
-        munmap(mapping->base, mapping->size);
+        unmap_region(mapping->base, mapping->size);
     }
     if (mapping->fd != -1) {
-        close(mapping->fd);
+        close_descriptor(mapping->fd);
     }
     mapping->fd = -1;
     mapping->base = nullptr;
@@ -366,7 +392,7 @@ CacheEntry* get_entry_ptr(void* shm_base, uint32_t index) {
 }
 
 int32_t find_slot(void* shm_base, const char* key) {
-    if (!shm_base || !key) {
+    if (!shm_base || !valid_key_argument(key)) {
         return -1;
     }
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
@@ -384,7 +410,7 @@ bool cache_put_ttl(
     const char* value,
     uint32_t ttl_sec
 ) {
-    if (!shm_base || !key || !value) {
+    if (!shm_base || !valid_key_argument(key) || !valid_value_argument(value)) {
         return false;
     }
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
@@ -447,7 +473,7 @@ bool cache_get(
     char* out_value,
     uint64_t* out_timestamp
 ) {
-    if (!shm_base || !key || !out_value) {
+    if (!shm_base || !valid_key_argument(key) || !out_value) {
         return false;
     }
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
@@ -524,7 +550,8 @@ bool cache_get(
 }
 
 bool cache_update(void* shm_base, const char* key, const char* new_value) {
-    if (!shm_base || !key || !new_value) {
+    if (!shm_base || !valid_key_argument(key) ||
+        !valid_value_argument(new_value)) {
         return false;
     }
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
@@ -564,7 +591,7 @@ bool cache_update(void* shm_base, const char* key, const char* new_value) {
 }
 
 bool cache_delete(void* shm_base, const char* key) {
-    if (!shm_base || !key) {
+    if (!shm_base || !valid_key_argument(key)) {
         return false;
     }
     CacheHeader* header = static_cast<CacheHeader*>(shm_base);
