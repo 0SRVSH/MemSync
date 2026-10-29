@@ -89,6 +89,9 @@ endif()
 
 add_executable(memsync_benchmark
     bench/cache_benchmark.cpp
+    bench/benchmark_measurement.cpp
+    bench/benchmark_reporting.cpp
+    bench/benchmark_socket.cpp
 )
 target_link_libraries(memsync_benchmark PRIVATE memsync_cache Threads::Threads)
 

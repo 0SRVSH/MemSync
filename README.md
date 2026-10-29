@@ -64,7 +64,7 @@ The supported cache API requires non-empty keys of at most 63 bytes and values o
 
 ### Opt-in performance benchmark
 
-`memsync_benchmark` compares cache operations with a local Unix-domain `socketpair` request/response cache. It measures GET hits, GET misses, PUT/update, and mixed workloads using 16-, 128-, and 255-byte values at one and four client threads. Each row reports operation count, failures, median/p95/p99 per-operation latency, throughput, and host/compiler/build metadata. Setup, warm-up, and socket/thread startup are excluded from measured operation latencies. The benchmark is opt-in and does not affect CTest pass/fail.
+`memsync_benchmark` compares cache operations with a local Unix-domain `socketpair` request/response cache. It measures GET hits, GET misses, PUT/update, and mixed workloads using 16-, 128-, and 255-byte values at one and four client threads. Each row reports operation count, failures, median/p95/p99 per-operation latency, throughput, and host/compiler/build metadata. Setup, warm-up, and socket/thread startup are excluded from measured operation latencies. The benchmark is opt-in and does not affect CTest pass/fail. Its entry point, socket baseline, measurement/workload logic, and reporting helpers are organized in separate files under `bench/`.
 
 ```bash
 mkdir -p bench/results
@@ -76,7 +76,7 @@ The `bench/results/` directory is ignored by Git because benchmark reports vary 
 
 ## 🖥️ Streamlit Evaluator Console
 
-The optional Streamlit UI lets evaluators inspect the shared-memory cache, perform CRUD operations, and run the existing CTest cases without using a terminal. It runs in Linux/WSL, like the cache itself.
+The optional Streamlit UI lets evaluators inspect the shared-memory cache, perform CRUD operations, run the existing CTest cases, and view a plain-language performance comparison without using a terminal. It runs in Linux/WSL, like the cache itself.
 
 After installing the project prerequisites and building it, install the UI dependency and start the app from the repository root:
 
@@ -91,7 +91,11 @@ The sidebar's **Danger zone: destroy shared-memory cache** runs the same cleanup
 
 In **Test Lab**, the UI discovers cases through CTest. Evaluators can select and run individual cases or subsets, or run all discovered tests. Results include pass/fail status, per-test duration, aggregate timing, and failure output.
 
+In **Benchmark**, evaluators can run the built `memsync_benchmark` executable and compare shared memory with the local Unix-socket baseline. The screen describes each workload in everyday terms, reports average latency and throughput across trials, and includes p95/p99 latency and failure counts for context. The benchmark runs all workload, payload-size, and thread-count combinations; larger operation counts and more trials take longer. Results are specific to the machine and run, and should not be presented as a universal performance guarantee.
+
 The UI uses the same `/memsync_shm` resource as `memsync_writer` and `memsync_reader`. Its lifecycle is absent → exclusively created/unpublished → ready → attached; a partial or invalid object is never treated as ready. The process that wins `O_CREAT | O_EXCL` alone sizes and initializes the versioned header, slots, and process-shared reader-writer lock, then publishes the ready marker last. Attachers validate the exact object size and layout before accessing the lock and fail with a retryable error if initialization is still in progress. Existing valid caches are attached without reset. The bridge's **Initialize cache** action creates the cache if absent and leaves an already valid cache and its records unchanged.
+
+The UI keeps `ui/app.py` as its Streamlit entry point. Cache, test, and benchmark screens live in separate view modules, shared bridge/CTest/benchmark calls are in `ui/services.py`, and project setup controls are in `ui/project_sidebar.py`.
 
 The cache uses only the process-shared `pthread_rwlock_t` in its shared header for synchronization. `legacy/shared_memory.cpp` and `legacy/shared_memory.h` contain the unused semaphore-manager prototype and are not part of the supported build. Creators and clients close only their own mappings; creator exit does not unlink the named object. `memsync_cleanup` explicitly unlinks the name and is idempotent when it is absent. Unlinking does not invalidate mappings already held by clients, but a later creator can create a different object under the same name; run cleanup only after all clients have exited. A crash or initialization failure can leave an invalid object. It is not automatically reinitialized and its lock is never guessed to be safe to reset; after confirming no clients remain, use cleanup before restarting. The standalone `memsync_test` demo intentionally unlinks the named cache on startup and exit, so never run it alongside writer, reader, or UI clients.
 
@@ -208,8 +212,17 @@ Supported production headers belong in `include/`; the unbuilt semaphore prototy
 │   ├── cache_capacity_test.cpp # Capacity and eviction tests
 │   └── cache_shared_memory_test.cpp # Process integration tests
 ├── ui/
-│   ├── app.py                  # Streamlit evaluator console
+│   ├── app.py                  # Streamlit entry point and screen composition
+│   ├── benchmark_view.py       # Benchmark runner and results view
+│   ├── cache_view.py           # Cache explorer and CRUD interface
+│   ├── project_sidebar.py      # Build directory and cache lifecycle controls
+│   ├── services.py             # Cache bridge and CTest subprocess helpers
+│   ├── test_view.py            # CTest test lab interface
 │   └── requirements.txt        # UI Python dependencies
 └── bench/
-    ├── cache_benchmark.cpp    # Opt-in shared-memory and local-socket benchmark
+    ├── benchmark.h            # Benchmark data types and module interfaces
+    ├── benchmark_measurement.cpp # Workloads, warm-up, and timed operations
+    ├── benchmark_reporting.cpp # Latency statistics and host/CSV helpers
+    ├── benchmark_socket.cpp   # Local socket-based cache baseline
+    ├── cache_benchmark.cpp    # Benchmark CLI and execution entry point
     └── results/               # Generated, ignored local CSV and summary output

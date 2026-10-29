@@ -1,6 +1,8 @@
 /build/
 /.venv/
 /.venv-ui/
+__pycache__/
+*.py[cod]
 /CMakeUserPresets.json
 /.vs/
 cmake-build-*/
