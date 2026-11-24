@@ -182,6 +182,163 @@ The prototype is implemented in C/C++ on Linux/WSL using native POSIX APIs.
 
 ---
 
+## 🏛️ Architecture Diagrams
+
+The diagrams below show the major application modules and how the main components interact. The first is a high-level view of the application, shared-memory data, and validation modules; the second focuses on component relationships.
+
+### Application Architecture
+
+```mermaid
+flowchart LR
+    subgraph Presentation["Presentation and Operations"]
+        Streamlit["Streamlit Evaluator Console"]
+        CacheScreen["Cache Explorer"]
+        TestScreen["Test Lab"]
+        BenchmarkScreen["Benchmark View"]
+        CLI["C++ Command-Line Clients"]
+    end
+
+    subgraph Bridge["Python and C++ Bridge"]
+        UIServices["UI Subprocess Services"]
+        UIBridge["memsync_ui_bridge"]
+    end
+
+    subgraph Application["C++ Application Modules"]
+        Engine["Cache Engine API"]
+        Writer["Writer Example"]
+        Reader["Reader Example"]
+        Demo["Standalone Demo"]
+        Cleanup["Cleanup Utility"]
+        Benchmark["Benchmark Executable"]
+        SocketBaseline["Unix Socket Baseline"]
+    end
+
+    subgraph Data["Shared-Memory Data and Synchronization"]
+        SHM[("POSIX Named Shared Memory")]
+        Header["Versioned Cache Header"]
+        Slots[("Fixed Cache Slots")]
+        RWLock["Process-Shared RWLock"]
+    end
+
+    subgraph Validation["Build and Validation"]
+        CMake["CMake and CTest"]
+        UnitTests["GoogleTest Unit Suite"]
+        IntegrationTests["Process Integration Suite"]
+        BenchmarkReports["CSV and Text Reports"]
+    end
+
+    Streamlit --> CacheScreen
+    Streamlit --> TestScreen
+    Streamlit --> BenchmarkScreen
+    CacheScreen -->|"JSON bridge calls"| UIServices
+    TestScreen -->|"CTest commands"| UIServices
+    BenchmarkScreen -->|"benchmark arguments"| UIServices
+    UIServices -->|"executes"| UIBridge
+    UIServices -->|"executes"| CMake
+    UIServices -->|"executes"| Benchmark
+    UIBridge -->|"CRUD and stats API"| Engine
+    CLI -->|"PUT and GET"| Engine
+    Writer -->|"cache writes"| Engine
+    Reader -->|"cache reads"| Engine
+    Demo -->|"demo operations"| Engine
+    Cleanup -->|"unlinks named object"| SHM
+    Engine -->|"shm_open and mmap"| SHM
+    SHM --> Header
+    SHM --> Slots
+    Header -->|"protects"| RWLock
+    Engine -->|"linear-probe operations"| Slots
+    Engine -->|"TTL and telemetry"| Header
+    Benchmark -->|"shared-memory workloads"| Engine
+    Benchmark -->|"socket workloads"| SocketBaseline
+    CMake -->|"build targets"| Application
+    CMake -->|"discovers"| UnitTests
+    CMake -->|"discovers"| IntegrationTests
+    UnitTests -->|"tests cache API"| Engine
+    IntegrationTests -->|"tests processes and lifecycle"| SHM
+    Benchmark -->|"writes"| BenchmarkReports
+```
+
+### Component Relationships
+
+```mermaid
+flowchart LR
+    subgraph PresentationComponents["Presentation"]
+        cApp["Streamlit App"]
+        cSidebar["Project Sidebar"]
+        cCacheView["Cache Explorer View"]
+        cTestView["Test Lab View"]
+        cBenchmarkView["Benchmark View"]
+    end
+
+    subgraph BridgeComponents["Bridge and Automation"]
+        cServices["UI Services"]
+        cBridge["UI Bridge"]
+        cCTest["CTest Runner"]
+        cBenchmarkCLI["Benchmark CLI"]
+    end
+
+    subgraph CoreComponents["C++ Core"]
+        cLifecycle["Shared-Memory Lifecycle"]
+        cEngine["Cache Engine"]
+        cHash["Hash and Linear Probe"]
+        cTTL["TTL and Eviction"]
+        cTelemetry["Telemetry Counters"]
+        cWriter["Writer"]
+        cReader["Reader"]
+        cCleanup["Cleanup"]
+    end
+
+    subgraph DataComponents["Shared Data"]
+        cHeader[("CacheHeader")]
+        cSlots[("CacheEntry Slots")]
+        cLock["Process-Shared RWLock"]
+    end
+
+    subgraph ValidationComponents["Validation"]
+        cUnitTests["Unit Test Modules"]
+        cIntegrationTests["Shared-Memory Integration Tests"]
+        cMeasurement["Benchmark Measurement"]
+        cSocket["Socket Baseline"]
+    end
+
+    cApp --> cSidebar
+    cApp --> cCacheView
+    cApp --> cTestView
+    cApp --> cBenchmarkView
+    cSidebar -->|"initialize or cleanup"| cServices
+    cCacheView -->|"CRUD commands"| cServices
+    cTestView -->|"test names"| cServices
+    cBenchmarkView -->|"run settings"| cServices
+    cServices -->|"subprocess JSON"| cBridge
+    cServices -->|"discover and run"| cCTest
+    cServices -->|"run executable"| cBenchmarkCLI
+    cBridge -->|"init stats and CRUD"| cEngine
+    cCTest -->|"unit and integration labels"| cUnitTests
+    cCTest -->|"process tests"| cIntegrationTests
+    cWriter -->|"PUT"| cEngine
+    cReader -->|"GET"| cEngine
+    cCleanup -->|"shm_unlink"| cLifecycle
+    cLifecycle -->|"open map validate"| cEngine
+    cEngine --> cHash
+    cEngine --> cTTL
+    cEngine --> cTelemetry
+    cHash -->|"slot lookup"| cSlots
+    cTTL -->|"expire and evict"| cSlots
+    cTelemetry -->|"hits misses collisions"| cHeader
+    cEngine -->|"read or write lock"| cLock
+    cLock -.->|"synchronizes"| cHeader
+    cLock -.->|"synchronizes"| cSlots
+    cHeader -->|"layout and counters"| cEngine
+    cSlots -->|"entry values"| cEngine
+    cBenchmarkCLI --> cMeasurement
+    cMeasurement -->|"shared-memory workload"| cEngine
+    cMeasurement -->|"local IPC workload"| cSocket
+    cUnitTests -->|"exercise operations"| cEngine
+    cIntegrationTests -->|"exercise processes"| cLifecycle
+```
+
+---
+
 ## 🗂️ Project Repository Structure
 
 Supported production headers belong in `include/`; the unbuilt semaphore prototype is kept under `legacy/`. The test fixture header is kept in `tests/` because it is only used by test code. CMake's generated `build/` directory, Python virtual environments, and machine-specific benchmark reports are local output and ignored by Git.
